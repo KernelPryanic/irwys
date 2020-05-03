@@ -102,7 +102,7 @@ func (b bot) remember(db DB, update tgbotapi.Update) {
 	}
 
 	l := len(strings.Split(update.Message.Text, " "))
-	if update.Message.Text != "" && (l < int(b.opts.minLength) || l > int(b.opts.maxLength)) && update.Message.Photo == nil {
+	if (l < int(b.opts.minLength) || l > int(b.opts.maxLength)) && update.Message.Photo == nil {
 		return
 	}
 
@@ -155,7 +155,8 @@ func (b bot) recall(db DB, update tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 	}
 
 	fwdMessageIdx := rand.Intn(len(messages.([]int)))
-	fwdMsg := tgbotapi.NewForward(update.Message.Chat.ID, update.Message.Chat.ID, messages.([]int)[fwdMessageIdx])
+	fwdMsg := tgbotapi.NewForward(update.Message.Chat.ID,
+		update.Message.Chat.ID, messages.([]int)[fwdMessageIdx])
 	_, err = botAPI.Send(fwdMsg)
 	if err != nil {
 		Error.Printf("Can't forward message\n\tChatId: %d\n\t%s", update.Message.Chat.ID, err)
@@ -181,6 +182,7 @@ func (b bot) watcher(db DB, ch chan tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 	var lastUpdateDate time.Time
 	var update tgbotapi.Update
 	var ok = true
+	rand.Seed(time.Now().UTC().UnixNano())
 
 	for {
 		select {
@@ -190,13 +192,17 @@ func (b bot) watcher(db DB, ch chan tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 			}
 			lastUpdateDate = time.Unix(int64(update.Message.Date), 0)
 		default:
-			if update.Message == nil {
+			now := time.Now()
+			if now.Hour() < int(b.opts.timeStart) || now.Hour() >= int(b.opts.timeEnd) ||
+				update.Message == nil {
 				continue
 			}
-			acceptableWindow := time.Now().Add(time.Duration(-b.opts.timeout) * time.Minute)
+			acceptableWindow := now.Add(time.Duration(-b.opts.timeout) * time.Minute)
 			if !lastUpdateDate.After(acceptableWindow) {
-				b.recall(db, update, botAPI)
-				lastUpdateDate = time.Now()
+				if rand.Float64() < 0.3 {
+					b.recall(db, update, botAPI)
+				}
+				lastUpdateDate = now
 			}
 		}
 	}

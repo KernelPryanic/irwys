@@ -20,8 +20,17 @@ var (
 	).Default(strconv.FormatUint(math.MaxUint16, 10)).Uint16()
 	timeout = kingpin.Flag(
 		"timeout",
-		"How long to wait after last message was posted (in minutes).",
+		`How long to wait after last message was posted (in minutes).
+		There is 30% chance of reply.`,
 	).Default("10").Short('t').Int16()
+	timeStart = kingpin.Flag(
+		"timeStart",
+		"When bot starts to recall.",
+	).Default("9").Uint8()
+	timeEnd = kingpin.Flag(
+		"timeEnd",
+		"When bot ends to recall.",
+	).Default("23").Uint8()
 	capacity = kingpin.Flag(
 		"capacity",
 		"Capacity of message storage per chat (in messages).",
@@ -50,6 +59,8 @@ func main() {
 		*minLength,
 		*maxLength,
 		*timeout,
+		*timeStart,
+		*timeEnd,
 		*capacity,
 		*dbPath,
 		*replyPath,
