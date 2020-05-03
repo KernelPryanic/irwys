@@ -263,15 +263,15 @@ func (b *Buffer) ReadByte() (c byte, err error) {
 // ReadBytes returns err != nil if and only if the returned data does not end in
 // delim.
 func (b *Buffer) ReadBytes(delim byte) (line []byte, err error) {
-	slice, err := b.GetSlice(delim)
+	slice, err := b.readSlice(delim)
 	// return a copy of slice. The buffer's backing array may
 	// be overwritten by later calls.
 	line = append(line, slice...)
 	return
 }
 
-// GetSlice is like ReadBytes but returns a reference to internal buffer data.
-func (b *Buffer) GetSlice(delim byte) (line []byte, err error) {
+// readSlice is like ReadBytes but returns a reference to internal buffer data.
+func (b *Buffer) readSlice(delim byte) (line []byte, err error) {
 	i := bytes.IndexByte(b.buf[b.off:], delim)
 	end := b.off + i + 1
 	if i < 0 {

@@ -84,8 +84,10 @@ func welcome(update tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 
 			"*Commands you can use:*\n\n" +
 
+			"/start - start the bot\n" +
+			"/stop - stop the bot\n" +
 			"/recall - recall random message\n" +
-			"/ru|/en - change the language\n" +
+			"/ru | /en - change the language\n" +
 			"/help - show this message",
 	)
 
@@ -93,7 +95,8 @@ func welcome(update tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 	msg.ParseMode = "markdown"
 	_, err := botAPI.Send(msg)
 	if err != nil {
-		Error.Printf("Can't send reply to %s", update.Message.From.UserName)
+		Error.Printf("Can't send reply to %s\n\tError: %s",
+			update.Message.From.UserName, err)
 	}
 }
 
@@ -171,12 +174,9 @@ func (b bot) recall(dbMessages DB, dbChats DB, update tgbotapi.Update, botAPI *t
 	Verbose.Printf("Recalled\n\tChatId: %d\n\tFwdMessageId: %d", update.Message.Chat.ID, evalMessages[fwdMessageID])
 }
 
-func (b bot) language(dbChats DB, update tgbotapi.Update, language ...string) {
+func (b bot) language(dbChats DB, update tgbotapi.Update) (err error) {
 	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
 	lang := update.Message.Text
-	if language != nil {
-		lang = language[0]
-	}
 
 	rawConf, err := dbChats.Get(chatIDStr)
 	if err != nil {
@@ -194,6 +194,8 @@ func (b bot) language(dbChats DB, update tgbotapi.Update, language ...string) {
 		Error.Printf("Can't set language\n\tChatId: %d\n\tLanguage: %s\n\t%s",
 			update.Message.Chat.ID, update.Message.Text, err)
 	}
+
+	return
 }
 
 func (b bot) watcher(dbMessages DB, dbChats DB, ch chan tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
@@ -210,6 +212,7 @@ func (b bot) watcher(dbMessages DB, dbChats DB, ch chan tgbotapi.Update, botAPI 
 			if ok == false {
 				break
 			}
+			b.remember(dbMessages, update)
 			lastUpdateDate = time.Unix(int64(update.Message.Date), 0)
 		default:
 			now := time.Now()
@@ -225,6 +228,50 @@ func (b bot) watcher(dbMessages DB, dbChats DB, ch chan tgbotapi.Update, botAPI 
 				lastUpdateDate = now
 			}
 		}
+		time.Sleep(time.Duration(1) * time.Millisecond)
+	}
+}
+
+func (b bot) start(dbChats DB, update tgbotapi.Update) {
+	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
+
+	if exist, _ := dbChats.Exist(chatIDStr); exist {
+		return
+	}
+
+	update.Message.Text = "en"
+	if err := b.language(dbChats, update); err != nil {
+		Error.Printf("Failed to start\n\tChatId: %d\n\tError: %s",
+			update.Message.Chat.ID, err)
+	} else {
+		Info.Printf("Bot successfully started\n\tChatId: %d", update.Message.Chat.ID)
+	}
+}
+
+func (b bot) stop(dbChats DB, update tgbotapi.Update) {
+	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
+
+	if exist, _ := dbChats.Exist(chatIDStr); !exist {
+		return
+	}
+
+	err := dbChats.Delete(chatIDStr)
+	if err != nil {
+		Error.Printf("Can't remove chat\n\tChatId: %d\n\tError: %s",
+			update.Message.Chat.ID, err)
+	}
+
+	if chats.Exist(chatIDStr) {
+		c := chats.Get(chatIDStr).(chan tgbotapi.Update)
+		close(c)
+		chats.Delete(chatIDStr)
+	}
+
+	if err != nil {
+		Error.Printf("Failed to stop\n\tChatId: %d\n\tError: %s",
+			update.Message.Chat.ID, err)
+	} else {
+		Info.Printf("Bot successfully stopped\n\tChatId: %d", update.Message.Chat.ID)
 	}
 }
 
@@ -273,16 +320,20 @@ func (b bot) Start() {
 			continue
 		}
 
+		chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
+
 		Info.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
 		Verbose.Printf("ChatId: %d", update.Message.Chat.ID)
 
 		switch update.Message.Command() {
 		case "start":
 			go welcome(update, botAPI)
-			go b.language(dbChats, update, "en")
+			b.start(dbChats, update)
 			ch := make(chan tgbotapi.Update, 1)
-			chats.Put(strconv.FormatInt(update.Message.Chat.ID, 10), ch)
+			chats.Put(chatIDStr, ch)
 			go b.watcher(dbMessages, dbChats, ch, botAPI)
+		case "stop":
+			b.stop(dbChats, update)
 		case "help":
 			go welcome(update, botAPI)
 		case "recall":
@@ -291,7 +342,8 @@ func (b bot) Start() {
 			go b.language(dbChats, update)
 		}
 
-		b.remember(dbMessages, update)
-		chats.Get(strconv.FormatInt(update.Message.Chat.ID, 10)).(chan tgbotapi.Update) <- update
+		if chats.Exist(chatIDStr) {
+			chats.Get(chatIDStr).(chan tgbotapi.Update) <- update
+		}
 	}
 }
