@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,7 @@ var (
 	Error   *log.Logger
 )
 
+var chats = NewSynMap()
 var lock = sync.RWMutex{}
 
 func Init(
@@ -95,7 +97,7 @@ func welcome(update tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 	}
 }
 
-func (b bot) remember(db DB, update tgbotapi.Update) {
+func (b bot) remember(dbMessages DB, update tgbotapi.Update) {
 	if update.Message.Chat.IsChannel() {
 		Warning.Printf("Do not work with channels.")
 		return
@@ -106,8 +108,8 @@ func (b bot) remember(db DB, update tgbotapi.Update) {
 		return
 	}
 
-	chatIDStr := strconv.FormatUint(uint64(update.Message.Chat.ID), 10)
-	m, err := db.Get(chatIDStr)
+	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
+	m, err := dbMessages.Get(chatIDStr)
 	handleRecallErr(err, update)
 	if m == nil {
 		m = []int{}
@@ -116,67 +118,85 @@ func (b bot) remember(db DB, update tgbotapi.Update) {
 	if len(messages) >= int(b.opts.capacity) {
 		messages = messages[len(messages)-int(b.opts.capacity)+1:]
 	}
-	err = db.Put(chatIDStr, append(messages, update.Message.MessageID))
+	err = dbMessages.Put(chatIDStr, append(messages, update.Message.MessageID))
 	handleRememberErr(err, update)
 }
 
-func (b bot) recall(db DB, update tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
+func (b bot) recall(dbMessages DB, dbChats DB, update tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 	if update.Message.Chat.IsChannel() {
 		Warning.Printf("Can't send reply to channel %s", update.Message.From.UserName)
 		return
 	}
 
+	var lang = "en"
+
 	rand.Seed(time.Now().UTC().UnixNano())
-	chatIDStr := strconv.FormatUint(uint64(update.Message.Chat.ID), 10)
-	messages, err := db.Get(chatIDStr)
+	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
+	rawMessages, err := dbMessages.Get(chatIDStr)
 	handleRecallErr(err, update)
 
-	if messages == nil {
+	if rawMessages == nil {
 		return
 	}
+	evalMessages := rawMessages.([]int)
 
-	lang, err := db.Get(fmt.Sprintf("%s-lang", strconv.FormatUint(uint64(update.Message.Chat.ID), 10)))
-	if lang == nil {
-		lang = "en"
+	rawConf, err := dbChats.Get(strconv.FormatInt(update.Message.Chat.ID, 10))
+	if rawConf != nil {
+		evalConf := rawConf.(map[string]string)
+		lang = evalConf["language"]
 	}
 	if err != nil {
 		Error.Printf("Can't get chat reply language\n\tChatId: %d", update.Message.Chat.ID)
 	}
-	data, err := ioutil.ReadFile(fmt.Sprintf("%s/%s", b.opts.replyPath, lang.(string)))
+
+	data, err := ioutil.ReadFile(filepath.Join(b.opts.replyPath, lang))
 	if err != nil {
 		Error.Printf("Can't open file with replies\n\tPath: %s\n\tError: %s", b.opts.replyPath, err)
 	}
 	replies := strings.Split(string(data), "\n")
-	replyIdx := rand.Intn(len(replies))
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, replies[replyIdx])
+	replyID := rand.Intn(len(replies))
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, replies[replyID])
 	_, err = botAPI.Send(msg)
 	if err != nil {
 		Error.Printf("Can't send message\n\tChatId: %d\n\t%s", update.Message.Chat.ID, err)
 	}
 
-	fwdMessageIdx := rand.Intn(len(messages.([]int)))
+	fwdMessageID := rand.Intn(len(evalMessages))
 	fwdMsg := tgbotapi.NewForward(update.Message.Chat.ID,
-		update.Message.Chat.ID, messages.([]int)[fwdMessageIdx])
+		update.Message.Chat.ID, evalMessages[fwdMessageID])
 	_, err = botAPI.Send(fwdMsg)
 	if err != nil {
 		Error.Printf("Can't forward message\n\tChatId: %d\n\t%s", update.Message.Chat.ID, err)
 	}
+	Verbose.Printf("Recalled\n\tChatId: %d\n\tFwdMessageId: %d", update.Message.Chat.ID, evalMessages[fwdMessageID])
 }
 
-func (b bot) language(db DB, update tgbotapi.Update, lang ...string) {
-	idStr := strconv.FormatUint(uint64(update.Message.Chat.ID), 10)
-	language := update.Message.Text
-	if lang != nil {
-		language = lang[0]
+func (b bot) language(dbChats DB, update tgbotapi.Update, language ...string) {
+	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
+	lang := update.Message.Text
+	if language != nil {
+		lang = language[0]
 	}
-	err := db.Put(fmt.Sprintf("%s-lang", idStr), language)
+
+	rawConf, err := dbChats.Get(chatIDStr)
+	if err != nil {
+		Error.Printf("Can't get chat information\n\tChatId: %d\n\t%s",
+			update.Message.Chat.ID, err)
+	}
+	if rawConf == nil {
+		rawConf = map[string]string{}
+	}
+	evalConf := rawConf.(map[string]string)
+
+	evalConf["language"] = lang
+	err = dbChats.Put(chatIDStr, evalConf)
 	if err != nil {
 		Error.Printf("Can't set language\n\tChatId: %d\n\tLanguage: %s\n\t%s",
 			update.Message.Chat.ID, update.Message.Text, err)
 	}
 }
 
-func (b bot) watcher(db DB, ch chan tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
+func (b bot) watcher(dbMessages DB, dbChats DB, ch chan tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 	defer close(ch)
 
 	var lastUpdateDate time.Time
@@ -200,11 +220,20 @@ func (b bot) watcher(db DB, ch chan tgbotapi.Update, botAPI *tgbotapi.BotAPI) {
 			acceptableWindow := now.Add(time.Duration(-b.opts.timeout) * time.Minute)
 			if !lastUpdateDate.After(acceptableWindow) {
 				if rand.Float64() < 0.3 {
-					b.recall(db, update, botAPI)
+					b.recall(dbMessages, dbChats, update, botAPI)
 				}
 				lastUpdateDate = now
 			}
 		}
+	}
+}
+
+func (b bot) initBot(dbMessages DB, dbChats DB, botAPI *tgbotapi.BotAPI) {
+	for it := dbChats.Iterate(nil); it.Next(); {
+		k, _ := it.Key(), it.Value()
+		ch := make(chan tgbotapi.Update, 1)
+		chats.Put(string(k), ch)
+		go b.watcher(dbMessages, dbChats, ch, botAPI)
 	}
 }
 
@@ -219,8 +248,10 @@ func (b bot) Start() {
 		BlockCacheCapacity: 128 * opt.MiB,
 		WriteBuffer:        16 * opt.MiB,
 	}
-	db := NewDB(b.opts.dbPath, o)
-	defer db.Close()
+	dbMessages := NewDB(b.opts.dbPath, "messages", o)
+	defer dbMessages.Close()
+	dbChats := NewDB(b.opts.dbPath, "chats", o)
+	defer dbChats.Close()
 
 	botAPI, err := tgbotapi.NewBotAPI(b.token)
 	if err != nil {
@@ -230,12 +261,12 @@ func (b bot) Start() {
 
 	Info.Printf("Authorized on account %s", botAPI.Self.UserName)
 
+	b.initBot(dbMessages, dbChats, botAPI)
+
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
 	updates, err := botAPI.GetUpdatesChan(u)
-	ch := make(chan tgbotapi.Update, 1)
-	go b.watcher(db, ch, botAPI)
 
 	for update := range updates {
 		if update.Message == nil {
@@ -243,20 +274,24 @@ func (b bot) Start() {
 		}
 
 		Info.Printf("[%s] %s", update.Message.From.UserName, update.Message.Text)
+		Verbose.Printf("ChatId: %d", update.Message.Chat.ID)
 
 		switch update.Message.Command() {
 		case "start":
 			go welcome(update, botAPI)
-			go b.language(db, update, "en")
+			go b.language(dbChats, update, "en")
+			ch := make(chan tgbotapi.Update, 1)
+			chats.Put(strconv.FormatInt(update.Message.Chat.ID, 10), ch)
+			go b.watcher(dbMessages, dbChats, ch, botAPI)
 		case "help":
 			go welcome(update, botAPI)
 		case "recall":
-			go b.recall(db, update, botAPI)
+			go b.recall(dbMessages, dbChats, update, botAPI)
 		case "ru", "en":
-			go b.language(db, update)
+			go b.language(dbChats, update)
 		}
 
-		b.remember(db, update)
-		ch <- update
+		b.remember(dbMessages, update)
+		chats.Get(strconv.FormatInt(update.Message.Chat.ID, 10)).(chan tgbotapi.Update) <- update
 	}
 }

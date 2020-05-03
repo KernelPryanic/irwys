@@ -1,5 +1,6 @@
 package irwys
 
+// Options structure.
 type Options struct {
 	minLength uint16
 	maxLength uint16
@@ -12,6 +13,7 @@ type Options struct {
 	verbose   bool
 }
 
+// NewOptions creates an object of NewOptions structure.
 func NewOptions(
 	minLength uint16,
 	maxLength uint16,
