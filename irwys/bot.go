@@ -14,6 +14,7 @@ import (
 	"time"
 
 	tgbotapi "github.com/Syfaro/telegram-bot-api"
+	"github.com/smallfish/simpleyaml"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
@@ -25,6 +26,7 @@ var (
 )
 
 var chats = NewSynMap()
+var replies = NewSynMap()
 var lock = sync.RWMutex{}
 
 func Init(
@@ -107,7 +109,7 @@ func (b bot) remember(dbMessages DB, update tgbotapi.Update) {
 	}
 
 	l := len(strings.Split(update.Message.Text, " "))
-	if (l < int(b.opts.minLength) || l > int(b.opts.maxLength)) && update.Message.Photo == nil {
+	if (l < int(b.opts.minWords) || l > int(b.opts.maxWords)) && update.Message.Photo == nil {
 		return
 	}
 
@@ -152,31 +154,33 @@ func (b bot) recall(dbMessages DB, dbChats DB, update tgbotapi.Update, botAPI *t
 		Error.Printf("Can't get chat reply language\n\tChatId: %d", update.Message.Chat.ID)
 	}
 
-	data, err := ioutil.ReadFile(filepath.Join(b.opts.replyPath, lang))
+	fwdMessageID := rand.Intn(len(evalMessages))
+	fwdMsg := tgbotapi.NewForward(update.Message.Chat.ID,
+		update.Message.Chat.ID, evalMessages[fwdMessageID])
+	sent, err := botAPI.Send(fwdMsg)
 	if err != nil {
-		Error.Printf("Can't open file with replies\n\tPath: %s\n\tError: %s", b.opts.replyPath, err)
+		Error.Printf("Can't forward message\n\tChatId: %d\n\t%s", update.Message.Chat.ID, err)
 	}
-	replies := strings.Split(string(data), "\n")
-	replyID := rand.Intn(len(replies))
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, replies[replyID])
+
+	possibleReplies := replies.Get(lang).(map[interface{}]interface{})
+	msgType := "text"
+	if sent.Photo != nil {
+		msgType = "photo"
+	}
+	replyID := rand.Intn(len(possibleReplies[msgType].([]interface{})))
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, possibleReplies[msgType].([]interface{})[replyID].(string))
 	_, err = botAPI.Send(msg)
 	if err != nil {
 		Error.Printf("Can't send message\n\tChatId: %d\n\t%s", update.Message.Chat.ID, err)
 	}
 
-	fwdMessageID := rand.Intn(len(evalMessages))
-	fwdMsg := tgbotapi.NewForward(update.Message.Chat.ID,
-		update.Message.Chat.ID, evalMessages[fwdMessageID])
-	_, err = botAPI.Send(fwdMsg)
-	if err != nil {
-		Error.Printf("Can't forward message\n\tChatId: %d\n\t%s", update.Message.Chat.ID, err)
-	}
 	Verbose.Printf("Recalled\n\tChatId: %d\n\tFwdMessageId: %d", update.Message.Chat.ID, evalMessages[fwdMessageID])
 }
 
 func (b bot) language(dbChats DB, update tgbotapi.Update) (err error) {
 	chatIDStr := strconv.FormatInt(update.Message.Chat.ID, 10)
 	lang := update.Message.Text
+	lang = strings.Replace(lang, "/", "", -1)
 
 	rawConf, err := dbChats.Get(chatIDStr)
 	if err != nil {
@@ -276,6 +280,21 @@ func (b bot) stop(dbChats DB, update tgbotapi.Update) {
 }
 
 func (b bot) initBot(dbMessages DB, dbChats DB, botAPI *tgbotapi.BotAPI) {
+	for _, lang := range []string{"en", "ru"} {
+		rawData, err := ioutil.ReadFile(filepath.Join(b.opts.replyPath, fmt.Sprintf("%s.yml", lang)))
+		if err != nil {
+			Error.Printf("Can't open file with replies\n\tPath: %s\n\tError: %s", b.opts.replyPath, err)
+		}
+
+		ymlData, err := simpleyaml.NewYaml(rawData)
+		if err != nil {
+			Error.Printf("Can't convert replies to YAML\n\tPath: %s\n\tError: %s", b.opts.replyPath, err)
+		}
+
+		m, _ := ymlData.Map()
+		replies.Put(lang, m)
+	}
+
 	for it := dbChats.Iterate(nil); it.Next(); {
 		k, _ := it.Key(), it.Value()
 		ch := make(chan tgbotapi.Update, 1)

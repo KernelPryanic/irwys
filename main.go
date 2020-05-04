@@ -10,19 +10,19 @@ import (
 )
 
 var (
-	minLength = kingpin.Flag(
-		"minLength",
+	minWords = kingpin.Flag(
+		"minWords",
 		"Minimal operational message lenght (in words). Min: 0",
-	).Default("4").Uint16()
-	maxLength = kingpin.Flag(
-		"maxLength",
+	).Default("25").Uint16()
+	maxWords = kingpin.Flag(
+		"maxWords",
 		fmt.Sprintf("Maximal operational message lenght (in words). Max: %d", math.MaxUint16),
 	).Default(strconv.FormatUint(math.MaxUint16, 10)).Uint16()
 	timeout = kingpin.Flag(
 		"timeout",
 		`How long to wait after last message was posted (in minutes).
 		There is 30% chance of reply.`,
-	).Default("10").Short('t').Int16()
+	).Default("30").Short('t').Int16()
 	timeStart = kingpin.Flag(
 		"timeStart",
 		"When bot starts to recall.",
@@ -56,8 +56,8 @@ var (
 func main() {
 	kingpin.Parse()
 	opts := irwys.NewOptions(
-		*minLength,
-		*maxLength,
+		*minWords,
+		*maxWords,
 		*timeout,
 		*timeStart,
 		*timeEnd,

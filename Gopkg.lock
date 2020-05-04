@@ -37,6 +37,14 @@
   version = "v0.0.1"
 
 [[projects]]
+  branch = "master"
+  digest = "1:ae5581ad198bcdab376525bc29a2f9fe245d1ad477d21ab787c94d47a8790815"
+  name = "github.com/smallfish/simpleyaml"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "a32031077861b1fbdf988d2c0865e98ec832dd4c"
+
+[[projects]]
   digest = "1:5b180f17d5bc50b765f4dcf0d126c72979531cbbd7f7929bf3edd87fb801ea2d"
   name = "github.com/syndtr/goleveldb"
   packages = [
@@ -73,11 +81,20 @@
   revision = "947dcec5ba9c011838740e680966fd7087a71d0d"
   version = "v2.2.6"
 
+[[projects]]
+  digest = "1:55b110c99c5fdc4f14930747326acce56b52cfce60b24b1c03ef686ac0e46bb1"
+  name = "gopkg.in/yaml.v2"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "53403b58ad1b561927d19068c655246f2db79d48"
+  version = "v2.2.8"
+
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
   input-imports = [
     "github.com/Syfaro/telegram-bot-api",
+    "github.com/smallfish/simpleyaml",
     "github.com/syndtr/goleveldb/leveldb",
     "github.com/syndtr/goleveldb/leveldb/iterator",
     "github.com/syndtr/goleveldb/leveldb/opt",

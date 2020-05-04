@@ -2,8 +2,8 @@ package irwys
 
 // Options structure.
 type Options struct {
-	minLength uint16
-	maxLength uint16
+	minWords  uint16
+	maxWords  uint16
 	timeout   int16
 	timeStart uint8
 	timeEnd   uint8
@@ -15,8 +15,8 @@ type Options struct {
 
 // NewOptions creates an object of NewOptions structure.
 func NewOptions(
-	minLength uint16,
-	maxLength uint16,
+	minWords uint16,
+	maxWords uint16,
 	timeout int16,
 	timeStart uint8,
 	timeEnd uint8,
@@ -26,7 +26,7 @@ func NewOptions(
 	verbose bool,
 ) Options {
 	o := Options{
-		minLength, maxLength, timeout, timeStart, timeEnd,
+		minWords, maxWords, timeout, timeStart, timeEnd,
 		capacity, dbPath, replyPath, verbose,
 	}
 	return o
